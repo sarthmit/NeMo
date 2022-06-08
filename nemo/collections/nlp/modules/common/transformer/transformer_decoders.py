@@ -20,7 +20,7 @@ import torch.nn as nn
 from omegaconf.omegaconf import MISSING
 
 from nemo.collections.common.parts import form_attention_mask
-from nemo.collections.nlp.modules.common.transformer.transformer_modules import MultiHeadAttention, PositionWiseFF
+from nemo.collections.nlp.modules.common.transformer.transformer_modules import MultiHeadAttention, PositionWiseFF, CompositionalAttention
 
 __all__ = ["TransformerDecoder"]
 
@@ -45,7 +45,10 @@ class TransformerDecoderBlock(nn.Module):
         self,
         hidden_size: int,
         inner_size: int,
+        attention_type: str = "MultiHead",
         num_attention_heads: int = 1,
+        num_attention_rules: int = 0,
+        qk_dim: int = 32,
         attn_score_dropout: float = 0.0,
         attn_layer_dropout: float = 0.0,
         ffn_dropout: float = 0.0,
@@ -55,13 +58,27 @@ class TransformerDecoderBlock(nn.Module):
         super().__init__()
         self.pre_ln = pre_ln
         self.layer_norm_1 = nn.LayerNorm(hidden_size, eps=1e-5)
-        self.first_sub_layer = MultiHeadAttention(
-            hidden_size, num_attention_heads, attn_score_dropout, attn_layer_dropout
-        )
+
+        if attention_type == "MultiHead":
+            self.first_sub_layer = MultiHeadAttention(
+                hidden_size, num_attention_heads, attn_score_dropout, attn_layer_dropout
+            )
+        elif attention_type == "Compositional":
+            self.first_sub_layer = CompositionalAttention(
+                hidden_size, num_attention_heads, num_attention_rules, qk_dim, attn_score_dropout, attn_layer_dropout
+            )
+
         self.layer_norm_2 = nn.LayerNorm(hidden_size, eps=1e-5)
-        self.second_sub_layer = MultiHeadAttention(
-            hidden_size, num_attention_heads, attn_score_dropout, attn_layer_dropout
-        )
+
+        if attention_type == "MultiHead":
+            self.second_sub_layer = MultiHeadAttention(
+                hidden_size, num_attention_heads, attn_score_dropout, attn_layer_dropout
+            )
+        elif attention_type == "Compositional":
+            self.second_sub_layer = CompositionalAttention(
+                hidden_size, num_attention_heads, num_attention_rules, qk_dim, attn_score_dropout, attn_layer_dropout
+            )
+
         self.layer_norm_3 = nn.LayerNorm(hidden_size, eps=1e-5)
         self.third_sub_layer = PositionWiseFF(hidden_size, inner_size, ffn_dropout, hidden_act)
 
@@ -118,7 +135,10 @@ class TransformerDecoder(nn.Module):
         num_layers: int,
         hidden_size: int,
         inner_size: int,
+        attention_type: str = "MultiHead",
         num_attention_heads: int = 1,
+        num_attention_rules: int = 0,
+        qk_dim: int = 32,
         attn_score_dropout: float = 0.0,
         attn_layer_dropout: float = 0.0,
         ffn_dropout: float = 0.0,
@@ -136,7 +156,10 @@ class TransformerDecoder(nn.Module):
         layer = TransformerDecoderBlock(
             hidden_size,
             inner_size,
+            attention_type,
             num_attention_heads,
+            num_attention_rules,
+            qk_dim,
             attn_score_dropout,
             attn_layer_dropout,
             ffn_dropout,

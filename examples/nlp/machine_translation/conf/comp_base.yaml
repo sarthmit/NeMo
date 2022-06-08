@@ -1,4 +1,4 @@
-name: AttentionIsAllYouNeed
+name: CompositionalAttention
 do_training: True # set to False if only preprocessing data
 do_testing: False # set to True to run evaluation on test data after training
 
@@ -107,8 +107,10 @@ model:
     hidden_size: 512
     num_layers: 6
     inner_size: 2048
-    attention_type: "MultiHead"
+    attention_type: "Compositional"
     num_attention_heads: 8
+    num_attention_rules: 8
+    qk_dim: 32
     ffn_dropout: 0.1
     attn_score_dropout: 0.1
     attn_layer_dropout: 0.1
@@ -128,8 +130,10 @@ model:
     hidden_size: 512
     inner_size: 2048
     num_layers: 6
-    attention_type: "MultiHead"
+    attention_type: "Compositional"
     num_attention_heads: 8
+    num_attention_rules: 8
+    qk_dim: 32
     ffn_dropout: 0.1
     attn_score_dropout: 0.1
     attn_layer_dropout: 0.1
@@ -156,5 +160,5 @@ trainer:
   check_val_every_n_epoch: 1
 
 exp_manager:
-  name: AAYNBase
+  name: COMPBASE
   files_to_copy: []

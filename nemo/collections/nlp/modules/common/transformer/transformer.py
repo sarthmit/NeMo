@@ -42,6 +42,9 @@ class NeMoTransformerConfig:
     num_layers: int = MISSING
     inner_size: int = MISSING
     num_attention_heads: int = MISSING
+    attention_type: str = MISSING
+    num_attention_rules: int = MISSING
+    qk_dim: int = MISSING
 
     # embedding
     max_sequence_length: int = 512
@@ -81,6 +84,9 @@ class TransformerEncoderNM(EncoderModule, Exportable):
         num_layers: int,
         inner_size: int,
         num_attention_heads: int,
+        attention_type: str = "MultiHead",
+        num_attention_rules: int = 0,
+        qk_dim: int = 32,
         max_sequence_length: int = 512,
         num_token_types: int = 2,
         embedding_dropout: float = 0.0,
@@ -112,7 +118,10 @@ class TransformerEncoderNM(EncoderModule, Exportable):
             hidden_size=self._hidden_size,
             num_layers=num_layers,
             inner_size=inner_size,
+            attention_type=attention_type,
             num_attention_heads=num_attention_heads,
+            num_attention_rules=num_attention_rules,
+            qk_dim=qk_dim,
             ffn_dropout=ffn_dropout,
             attn_score_dropout=attn_score_dropout,
             attn_layer_dropout=attn_layer_dropout,
@@ -169,6 +178,9 @@ class TransformerDecoderNM(DecoderModule, Exportable):
         num_layers: int,
         inner_size: int,
         num_attention_heads: int,
+        attention_type: str = "MultiHead",
+        num_attention_rules: int = 0,
+        qk_dim: int = 32,
         max_sequence_length: int = 512,
         num_token_types: int = 2,
         embedding_dropout: float = 0.0,
@@ -203,7 +215,10 @@ class TransformerDecoderNM(DecoderModule, Exportable):
             hidden_size=self.hidden_size,
             num_layers=num_layers,
             inner_size=inner_size,
+            attention_type=attention_type,
             num_attention_heads=num_attention_heads,
+            num_attention_rules=num_attention_rules,
+            qk_dim=qk_dim,
             ffn_dropout=ffn_dropout,
             attn_score_dropout=attn_score_dropout,
             attn_layer_dropout=attn_layer_dropout,
