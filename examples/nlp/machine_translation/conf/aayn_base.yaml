@@ -109,6 +109,8 @@ model:
     inner_size: 2048
     attention_type: "MultiHead"
     num_attention_heads: 8
+    num_attention_rules: 8
+    qk_dim: 32
     ffn_dropout: 0.1
     attn_score_dropout: 0.1
     attn_layer_dropout: 0.1
@@ -130,6 +132,8 @@ model:
     num_layers: 6
     attention_type: "MultiHead"
     num_attention_heads: 8
+    num_attention_rules: 8
+    qk_dim: 32
     ffn_dropout: 0.1
     attn_score_dropout: 0.1
     attn_layer_dropout: 0.1
