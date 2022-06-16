@@ -98,6 +98,7 @@ class TransformerEncoderNM(EncoderModule, Exportable):
         mask_future: bool = False,
         pre_ln: bool = False,
         pre_ln_final_layer_norm: bool = True,
+        embedding: bool = False
     ):
         super().__init__()
 
@@ -129,6 +130,7 @@ class TransformerEncoderNM(EncoderModule, Exportable):
             mask_future=mask_future,
             pre_ln=pre_ln,
             pre_ln_final_layer_norm=pre_ln_final_layer_norm,
+            embedding=embedding
         )
 
     @typecheck()
@@ -191,6 +193,7 @@ class TransformerDecoderNM(DecoderModule, Exportable):
         hidden_act: str = 'relu',
         pre_ln: bool = False,
         pre_ln_final_layer_norm: bool = True,
+        embedding: bool = False
     ):
         super().__init__()
 
@@ -225,6 +228,7 @@ class TransformerDecoderNM(DecoderModule, Exportable):
             hidden_act=hidden_act,
             pre_ln=pre_ln,
             pre_ln_final_layer_norm=pre_ln_final_layer_norm,
+            embedding=embedding
         )
 
     @typecheck()

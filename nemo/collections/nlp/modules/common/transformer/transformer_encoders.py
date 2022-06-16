@@ -54,6 +54,7 @@ class TransformerEncoderBlock(nn.Module):
         ffn_dropout: float = 0.0,
         hidden_act: str = "relu",
         pre_ln: bool = False,
+        embedding: bool = False
     ):
         super().__init__()
         self.pre_ln = pre_ln
@@ -65,7 +66,7 @@ class TransformerEncoderBlock(nn.Module):
             )
         elif attention_type == "Compositional":
             self.first_sub_layer = CompositionalAttention(
-                hidden_size, num_attention_heads, num_attention_rules, qk_dim, attn_score_dropout, attn_layer_dropout
+                hidden_size, num_attention_heads, num_attention_rules, qk_dim, attn_score_dropout, attn_layer_dropout, embedding
             )
 
         self.layer_norm_2 = nn.LayerNorm(hidden_size, eps=1e-5)
@@ -128,6 +129,7 @@ class TransformerEncoder(nn.Module):
         hidden_act: str = "relu",
         pre_ln: bool = False,
         pre_ln_final_layer_norm: bool = True,
+        embedding: bool = False
     ):
         super().__init__()
 
@@ -148,6 +150,7 @@ class TransformerEncoder(nn.Module):
             ffn_dropout,
             hidden_act,
             pre_ln,
+            embedding
         )
         self.layers = nn.ModuleList([copy.deepcopy(layer) for _ in range(num_layers)])
         self.diag = 0 if mask_future else None

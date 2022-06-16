@@ -219,7 +219,7 @@ class CompositionalAttention(nn.Module):
             whole layer, but before layer normalization
     """
 
-    def __init__(self, hidden_size, num_attention_heads, num_attention_rules=None, qk_dim=32, attn_score_dropout=0.0, attn_layer_dropout=0.0):
+    def __init__(self, hidden_size, num_attention_heads, num_attention_rules=None, qk_dim=32, attn_score_dropout=0.0, attn_layer_dropout=0.0, embedding=False):
         super().__init__()
         if hidden_size % num_attention_heads != 0:
             raise ValueError(
@@ -229,12 +229,18 @@ class CompositionalAttention(nn.Module):
         self.hidden_size = hidden_size
         self.num_attention_heads = num_attention_heads
         self.num_attention_rules = num_attention_rules
+        self.embedding = embedding
+
         if self.num_attention_rules is None or self.num_attention_rules == 0:
             self.num_attention_rules = self.num_attention_heads
 
         self.qk_dim = qk_dim
         self.attn_head_size = int(hidden_size / num_attention_heads)
         self.attn_scale = math.sqrt(math.sqrt(self.attn_head_size))
+
+        if self.embedding:
+            self.e = nn.Parameter(torch.zeros(1, 1, self.num_attention_heads, self.num_attention_rules, self.attn_head_size))
+            nn.init.xavier_uniform_(self.e)
 
         self.query_net = nn.Linear(hidden_size, hidden_size)
         self.key_net = nn.Linear(hidden_size, hidden_size)
@@ -279,7 +285,7 @@ class CompositionalAttention(nn.Module):
         context = context.permute(0, 3, 1, 2, 4).contiguous()
 
         q_v = self.query_value_net(queries).view(queries.size()[:-1] + (self.num_attention_heads, 1, self.qk_dim)) / np.sqrt(self.qk_dim)
-        k_v = self.key_value_net(context)
+        k_v = self.key_value_net(context + self.e)
         comp_score = torch.softmax(torch.matmul(q_v, k_v.transpose(4, 3)), dim=-1).reshape(queries.size()[:-1] + (self.num_attention_heads, self.num_attention_rules, 1))
 
         context = (context * comp_score).sum(dim=-2)
