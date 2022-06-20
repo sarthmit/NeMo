@@ -20,7 +20,7 @@ import torch.nn as nn
 from omegaconf.omegaconf import MISSING
 
 from nemo.collections.common.parts import form_attention_mask
-from nemo.collections.nlp.modules.common.transformer.transformer_modules import MultiHeadAttention, PositionWiseFF, CompositionalAttention
+from nemo.collections.nlp.modules.common.transformer.transformer_modules import MultiHeadAttention, PositionWiseFF, CompositionalAttention, NonlinearMultiHeadAttention
 
 __all__ = ["TransformerEncoder"]
 
@@ -67,6 +67,10 @@ class TransformerEncoderBlock(nn.Module):
         elif attention_type == "Compositional":
             self.first_sub_layer = CompositionalAttention(
                 hidden_size, num_attention_heads, num_attention_rules, qk_dim, attn_score_dropout, attn_layer_dropout, embedding
+            )
+        elif attention_type == "NonlinearMultiHeadAttention":
+            self.first_sub_layer = NonlinearMultiHeadAttention(
+                hidden_size, num_attention_heads, attn_score_dropout, attn_layer_dropout
             )
 
         self.layer_norm_2 = nn.LayerNorm(hidden_size, eps=1e-5)
