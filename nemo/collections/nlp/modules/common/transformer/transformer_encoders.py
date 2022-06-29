@@ -24,6 +24,18 @@ from nemo.collections.nlp.modules.common.transformer.transformer_modules import 
 
 __all__ = ["TransformerEncoder"]
 
+class TypeInference(nn.Module):
+    def __init__(self, hidden_dim, num_rules, dim):
+        super().__init__()
+
+        self.linear = nn.Linear(hidden_dim, dim)
+        self.codes = nn.Parameter(torch.randn(1, dim, num_rules))
+
+    def forward(self, x):
+        type = self.linear(x) # (bsz, n_tokens, dim)
+        score = torch.matmul(type, self.codes).transpose(-2, -1) # (bsz, num_rules, n_tokens)
+        score = F.softmax(score, dim=1)
+        return score.unsqueeze(-1)
 
 class TransformerEncoderBlock(nn.Module):
     """
@@ -72,9 +84,20 @@ class TransformerEncoderBlock(nn.Module):
             self.first_sub_layer = NonlinearMultiHeadAttention(
                 hidden_size, num_attention_heads, attn_score_dropout, attn_layer_dropout
             )
+        elif attention_type == 'NI':
+            self.codes = nn.Parameter(torch.randn(1, num_attention_rules, self.qk_dim))
+            self.first_sub_layer = NIAttention(
+                hidden_size, num_attention_heads, num_attention_rules, qk_dim, attn_score_dropout, attn_layer_dropout
+            )
 
         self.layer_norm_2 = nn.LayerNorm(hidden_size, eps=1e-5)
-        self.second_sub_layer = PositionWiseFF(hidden_size, inner_size, ffn_dropout, hidden_act)
+        if attention_type == 'NI':
+            self.second_sub_layer = NIPositionWiseFF(hidden_size, inner_size, qk_dim, ffn_dropout, hidden_act)
+        else:
+            self.second_sub_layer = PositionWiseFF(hidden_size, inner_size, ffn_dropout, hidden_act)
+
+        if attention_type == 'NI':
+            self.type = TypeInference(hidden_size, num_attention_rules, qk_dim)
 
     def forward_preln(self, encoder_query, encoder_mask, encoder_keys):
         """
@@ -82,14 +105,22 @@ class TransformerEncoderBlock(nn.Module):
         Order of operations: LN -> Self-Attn -> Residual -> LN -> Cross-Attn -> Residual -> LN -> FFN
         """
         residual = encoder_query
+        if self.attention_type == 'NI':
+            comp_score = self.type(residual)
         encoder_query = self.layer_norm_1(encoder_query)
         encoder_keys = self.layer_norm_1(encoder_keys)
-        self_attn_output = self.first_sub_layer(encoder_query, encoder_keys, encoder_keys, encoder_mask)
+        if self.attention_type == 'NI':
+            self_attn_output = self.first_sub_layer(encoder_query, encoder_keys, encoder_keys, self.codes, comp_score, encoder_mask)
+        else:
+            self_attn_output = self.first_sub_layer(encoder_query, encoder_keys, encoder_keys, encoder_mask)
         self_attn_output += residual
 
         residual = self_attn_output
         self_attn_output = self.layer_norm_2(self_attn_output)
-        output_states = self.second_sub_layer(self_attn_output)
+        if self.attention_type == 'NI':
+            output_states = self.second_sub_layer(self_attn_output, self.codes, comp_score)
+        else:
+            output_states = self.second_sub_layer(self_attn_output)
         output_states += residual
 
         return output_states
@@ -99,11 +130,20 @@ class TransformerEncoderBlock(nn.Module):
         Post-LayerNorm block
         Order of operations: Self-Attn -> Residual -> LN -> Cross-Attn -> Residual -> LN -> FFN -> Residual -> LN
         """
-        self_attn_output = self.first_sub_layer(encoder_query, encoder_keys, encoder_keys, encoder_mask)
+        if self.attention_type == 'NI':
+            comp_score = self.type(encoder_query)
+
+        if self.attention_type == 'NI':
+            self_attn_output = self.first_sub_layer(encoder_query, encoder_keys, encoder_keys, self.codes, comp_score, encoder_mask)
+        else:
+            self_attn_output = self.first_sub_layer(encoder_query, encoder_keys, encoder_keys, encoder_mask)
         self_attn_output += encoder_query
         self_attn_output = self.layer_norm_1(self_attn_output)
 
-        output_states = self.second_sub_layer(self_attn_output)
+        if self.attention_type == 'NI':
+            output_states = self.second_sub_layer(self_attn_output, self.codes, comp_score)
+        else:
+            output_states = self.second_sub_layer(self_attn_output)
         output_states += self_attn_output
         output_states = self.layer_norm_2(output_states)
 

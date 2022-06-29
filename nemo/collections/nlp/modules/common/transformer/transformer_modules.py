@@ -137,7 +137,6 @@ class TransformerEmbedding(nn.Module):
 
         return embeddings
 
-
 class MultiHeadAttention(nn.Module):
     """
     Multi-head scaled dot-product attention layer.
@@ -456,3 +455,126 @@ class AttentionBridge(torch.nn.Module):
             return M, ortho_loss
         else:
             return M
+
+class NIAttention(nn.Module):
+    """
+    Multi-head scaled dot-product attention layer.
+
+    Args:
+        hidden_size: size of the embeddings in the model, also known as d_model
+        num_attention_heads: number of heads in multi-head attention
+        attn_score_dropout: probability of dropout applied to attention scores
+        attn_layer_dropout: probability of dropout applied to the output of the
+            whole layer, but before layer normalization
+    """
+
+    def __init__(self, hidden_size, num_attention_heads, num_attention_rules=None, qk_dim=32, attn_score_dropout=0.0, attn_layer_dropout=0.0):
+        super().__init__()
+        if hidden_size % num_attention_heads != 0:
+            raise ValueError(
+                "The hidden size (%d) is not a multiple of the number "
+                "of attention heads (%d)" % (hidden_size, num_attention_heads)
+            )
+        self.hidden_size = hidden_size
+        self.num_attention_heads = num_attention_heads
+        self.attn_head_size = int(hidden_size / num_attention_heads)
+        self.attn_scale = math.sqrt(math.sqrt(self.attn_head_size))
+        self.qk_dim = qk_dim
+        self.num_attention_rules = num_attention_rules
+
+        self.query_net = nn.Linear(hidden_size, hidden_size)
+        self.query_code = nn.Linear(self.qk_dim, hidden_size * self.num_attention_heads)
+        self.query_ln = nn.LayerNorm(hidden_size)
+
+        self.key_net = nn.Linear(hidden_size, hidden_size)
+        self.key_code = nn.Linear(self.qk_dim, hidden_size * self.num_attention_heads)
+        self.key_ln = nn.LayerNorm(hidden_size)
+
+        self.value_net = nn.Linear(hidden_size, hidden_size)
+        self.value_code = nn.Linear(self.qk_dim, hidden_size * self.num_attention_heads)
+        self.value_ln = nn.LayerNorm(hidden_size)
+
+        self.out_projection = nn.Linear(hidden_size, hidden_size)
+
+        self.attn_dropout = nn.Dropout(attn_score_dropout)
+        self.layer_dropout = nn.Dropout(attn_layer_dropout)
+
+    def transpose_for_scores(self, x):
+        new_x_shape = x.size()[:-1] + (self.num_attention_heads, self.attn_head_size)
+        x = x.view(*new_x_shape)
+        return x.permute(0, 1, 3, 2, 4)
+
+    def forward(self, queries, keys, values, codes, comp_score, attention_mask):
+
+        # attention_mask is needed to hide the tokens which correspond to [PAD]
+        # in the case of BERT, or to hide the future tokens in the case of
+        # vanilla language modeling and translation
+
+        q_c = self.query_ln(self.query_code(self.codes)) # (1, num_rules, 1, hidden_size)
+        k_c = self.key_ln(self.key_code(self.codes)) # (1, num_rules, 1, hidden_size)
+        v_c = self.value_ln(self.value_code(self.codes)) # (1, num_rules, 1, hidden_size)
+
+        query = self.query_net(queries.unsqueeze(1) * q_c)
+        key = self.key_net(keys.unsqueeze(1) * k_c)
+        value = self.value_net(values.unsqueeze(1) * k_v)
+
+        query = self.transpose_for_scores(query) / self.attn_scale
+        key = self.transpose_for_scores(key) / self.attn_scale
+        value = self.transpose_for_scores(value)
+
+        # for numerical stability we pre-divide query and key by sqrt(sqrt(d))
+        attention_scores = torch.matmul(query, key.transpose(-1, -2))
+        if attention_mask is not None:
+            attention_scores = attention_scores + attention_mask.to(attention_scores.dtype)
+        attention_probs = torch.softmax(attention_scores, dim=-1)
+        attention_probs = self.attn_dropout(attention_probs)
+
+        context = torch.matmul(attention_probs, value)
+        context = (context * comp_score).sum(dim=1)
+        context = context.permute(0, 2, 1, 3).contiguous()
+        new_context_shape = context.size()[:-2] + (self.hidden_size,)
+        context = context.view(*new_context_shape)
+
+        # output projection
+        output_states = self.out_projection(context)
+        output_states = self.layer_dropout(output_states)
+        return output_states
+
+class NIPositionWiseFF(nn.Module):
+    """
+    Position-wise feed-forward network of Transformer block.
+
+    Args:
+        hidden_size: size of the embeddings in the model, also known as d_model
+        inner_size: number of neurons in the intermediate part of feed-forward
+            net, usually is (4-8 x hidden_size) in the papers
+        ffn_dropout: probability of dropout applied to net output
+        hidden_act: activation function used between two linear layers
+    """
+
+    def __init__(self, hidden_size, inner_size, qk_dim=32, ffn_dropout=0.0, hidden_act="relu"):
+        super().__init__()
+        self.dense_in = nn.Linear(hidden_size, inner_size)
+
+        self.wc_1 = nn.Linear(qk_dim, hidden_size)
+        self.ln_1 = nn.LayerNorm(hidden_size)
+
+        self.dense_out = nn.Linear(inner_size, hidden_size)
+
+        self.wc_2 = nn.Linear(qk_dim, inner_size)
+        self.ln_2 = nn.LayerNorm(inner_size)
+
+        self.layer_dropout = nn.Dropout(ffn_dropout)
+        ACT2FN = {"gelu": gelu, "relu": torch.relu}
+        self.act_fn = ACT2FN[hidden_act]
+
+    def forward(self, hidden_states, codes, comp_score):
+        c_1 = self.ln_1(self.wc_1(self.codes)) # (1, num_rules, 1, hidden_size)
+        c_2 = self.ln_2(self.wc_2(self.codes)) # (1, num_rules, 1, inner_size)
+
+        output_states = self.dense_in(hidden_states.unsqueeze(1) * c_1)
+        output_states = self.act_fn(output_states)
+        output_states = self.dense_out(output_states.unsqueeze(1) * c_2)
+        output_states = (output_states * comp_score).sum(dim=1)
+        output_states = self.layer_dropout(output_states)
+        return output_states
