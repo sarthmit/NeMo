@@ -362,7 +362,10 @@ class CompositionalAttention(nn.Module):
         context = context.permute(0, 3, 1, 2, 4).contiguous()
 
         q_v = self.query_value_net(queries).view(queries.size()[:-1] + (self.num_attention_heads, 1, self.qk_dim)) / np.sqrt(self.qk_dim)
-        k_v = self.key_value_net(context + self.e)
+        if self.embedding:
+            k_v = self.key_value_net(context + self.e)
+        else:
+            k_v = self.key_value_net(context)
         comp_score = torch.softmax(torch.matmul(q_v, k_v.transpose(4, 3)), dim=-1).reshape(queries.size()[:-1] + (self.num_attention_heads, self.num_attention_rules, 1))
 
         context = (context * comp_score).sum(dim=-2)
