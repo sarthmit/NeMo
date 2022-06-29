@@ -483,18 +483,20 @@ class NIAttention(nn.Module):
         self.num_attention_rules = num_attention_rules
 
         self.query_net = nn.Linear(hidden_size, hidden_size)
-        self.query_code = nn.Linear(self.qk_dim, hidden_size * self.num_attention_heads)
+        self.query_code = nn.Linear(self.qk_dim, hidden_size)
         self.query_ln = nn.LayerNorm(hidden_size)
 
         self.key_net = nn.Linear(hidden_size, hidden_size)
-        self.key_code = nn.Linear(self.qk_dim, hidden_size * self.num_attention_heads)
+        self.key_code = nn.Linear(self.qk_dim, hidden_size)
         self.key_ln = nn.LayerNorm(hidden_size)
 
         self.value_net = nn.Linear(hidden_size, hidden_size)
-        self.value_code = nn.Linear(self.qk_dim, hidden_size * self.num_attention_heads)
+        self.value_code = nn.Linear(self.qk_dim, hidden_size)
         self.value_ln = nn.LayerNorm(hidden_size)
 
         self.out_projection = nn.Linear(hidden_size, hidden_size)
+        self.out_code = nn.Linear(self.qk_dim, hidden_size)
+        self.out_ln = nn.LayerNorm(hidden_size)
 
         self.attn_dropout = nn.Dropout(attn_score_dropout)
         self.layer_dropout = nn.Dropout(attn_layer_dropout)
@@ -510,13 +512,14 @@ class NIAttention(nn.Module):
         # in the case of BERT, or to hide the future tokens in the case of
         # vanilla language modeling and translation
 
-        q_c = self.query_ln(self.query_code(self.codes)) # (1, num_rules, 1, hidden_size)
-        k_c = self.key_ln(self.key_code(self.codes)) # (1, num_rules, 1, hidden_size)
-        v_c = self.value_ln(self.value_code(self.codes)) # (1, num_rules, 1, hidden_size)
+        q_c = self.query_ln(self.query_code(codes)) # (1, num_rules, 1, hidden_size)
+        k_c = self.key_ln(self.key_code(codes)) # (1, num_rules, 1, hidden_size)
+        v_c = self.value_ln(self.value_code(codes)) # (1, num_rules, 1, hidden_size)
+        out_c = self.out_ln(self.out_code(codes))
 
-        query = self.query_net(queries.unsqueeze(1) * q_c)
-        key = self.key_net(keys.unsqueeze(1) * k_c)
-        value = self.value_net(values.unsqueeze(1) * k_v)
+        query = self.query_net(queries * q_c)
+        key = self.key_net(keys * k_c)
+        value = self.value_net(values * v_c)
 
         query = self.transpose_for_scores(query) / self.attn_scale
         key = self.transpose_for_scores(key) / self.attn_scale
@@ -525,18 +528,17 @@ class NIAttention(nn.Module):
         # for numerical stability we pre-divide query and key by sqrt(sqrt(d))
         attention_scores = torch.matmul(query, key.transpose(-1, -2))
         if attention_mask is not None:
-            attention_scores = attention_scores + attention_mask.to(attention_scores.dtype)
+            attention_scores = attention_scores + attention_mask.unsqueeze(1).to(attention_scores.dtype)
         attention_probs = torch.softmax(attention_scores, dim=-1)
         attention_probs = self.attn_dropout(attention_probs)
 
         context = torch.matmul(attention_probs, value)
-        context = (context * comp_score).sum(dim=1)
-        context = context.permute(0, 2, 1, 3).contiguous()
+        context = context.permute(0, 1, 3, 2, 4).contiguous()
         new_context_shape = context.size()[:-2] + (self.hidden_size,)
         context = context.view(*new_context_shape)
 
         # output projection
-        output_states = self.out_projection(context)
+        output_states = self.out_projection(context * out_c)
         output_states = self.layer_dropout(output_states)
         return output_states
 
@@ -569,12 +571,11 @@ class NIPositionWiseFF(nn.Module):
         self.act_fn = ACT2FN[hidden_act]
 
     def forward(self, hidden_states, codes, comp_score):
-        c_1 = self.ln_1(self.wc_1(self.codes)) # (1, num_rules, 1, hidden_size)
-        c_2 = self.ln_2(self.wc_2(self.codes)) # (1, num_rules, 1, inner_size)
+        c_1 = self.ln_1(self.wc_1(codes)) # (1, num_rules, 1, hidden_size)
+        c_2 = self.ln_2(self.wc_2(codes)) # (1, num_rules, 1, inner_size)
 
-        output_states = self.dense_in(hidden_states.unsqueeze(1) * c_1)
+        output_states = self.dense_in(hidden_states * c_1)
         output_states = self.act_fn(output_states)
-        output_states = self.dense_out(output_states.unsqueeze(1) * c_2)
-        output_states = (output_states * comp_score).sum(dim=1)
+        output_states = self.dense_out(output_states * c_2)
         output_states = self.layer_dropout(output_states)
         return output_states

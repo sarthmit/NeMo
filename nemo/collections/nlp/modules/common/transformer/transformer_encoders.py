@@ -17,10 +17,11 @@ from dataclasses import dataclass
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from omegaconf.omegaconf import MISSING
 
 from nemo.collections.common.parts import form_attention_mask
-from nemo.collections.nlp.modules.common.transformer.transformer_modules import MultiHeadAttention, PositionWiseFF, CompositionalAttention, NonlinearMultiHeadAttention
+from nemo.collections.nlp.modules.common.transformer.transformer_modules import MultiHeadAttention, PositionWiseFF, CompositionalAttention, NonlinearMultiHeadAttention, NIAttention, NIPositionWiseFF
 
 __all__ = ["TransformerEncoder"]
 
@@ -71,6 +72,7 @@ class TransformerEncoderBlock(nn.Module):
         super().__init__()
         self.pre_ln = pre_ln
         self.layer_norm_1 = nn.LayerNorm(hidden_size, eps=1e-5)
+        self.attention_type = attention_type
 
         if attention_type == "MultiHead":
             self.first_sub_layer = MultiHeadAttention(
@@ -85,7 +87,7 @@ class TransformerEncoderBlock(nn.Module):
                 hidden_size, num_attention_heads, attn_score_dropout, attn_layer_dropout
             )
         elif attention_type == 'NI':
-            self.codes = nn.Parameter(torch.randn(1, num_attention_rules, self.qk_dim))
+            self.codes = nn.Parameter(torch.randn(1, num_attention_rules, 1, qk_dim))
             self.first_sub_layer = NIAttention(
                 hidden_size, num_attention_heads, num_attention_rules, qk_dim, attn_score_dropout, attn_layer_dropout
             )
@@ -97,7 +99,7 @@ class TransformerEncoderBlock(nn.Module):
             self.second_sub_layer = PositionWiseFF(hidden_size, inner_size, ffn_dropout, hidden_act)
 
         if attention_type == 'NI':
-            self.type = TypeInference(hidden_size, num_attention_rules, qk_dim)
+            self.t = TypeInference(hidden_size, num_attention_rules, qk_dim)
 
     def forward_preln(self, encoder_query, encoder_mask, encoder_keys):
         """
@@ -106,14 +108,15 @@ class TransformerEncoderBlock(nn.Module):
         """
         residual = encoder_query
         if self.attention_type == 'NI':
-            comp_score = self.type(residual)
+            comp_score = self.t(residual)
         encoder_query = self.layer_norm_1(encoder_query)
         encoder_keys = self.layer_norm_1(encoder_keys)
         if self.attention_type == 'NI':
-            self_attn_output = self.first_sub_layer(encoder_query, encoder_keys, encoder_keys, self.codes, comp_score, encoder_mask)
+            self_attn_output = self.first_sub_layer(encoder_query.unsqueeze(1), encoder_keys.unsqueeze(1), encoder_keys.unsqueeze(1), self.codes, comp_score, encoder_mask)
+            self_attn_output += residual.unsqueeze(1)
         else:
             self_attn_output = self.first_sub_layer(encoder_query, encoder_keys, encoder_keys, encoder_mask)
-        self_attn_output += residual
+            self_attn_output += residual
 
         residual = self_attn_output
         self_attn_output = self.layer_norm_2(self_attn_output)
@@ -123,6 +126,9 @@ class TransformerEncoderBlock(nn.Module):
             output_states = self.second_sub_layer(self_attn_output)
         output_states += residual
 
+        if self.attention_type == 'NI':
+            output_states = (output_states * comp_score).sum(dim=1)
+
         return output_states
 
     def forward_postln(self, encoder_query, encoder_mask, encoder_keys):
@@ -131,13 +137,14 @@ class TransformerEncoderBlock(nn.Module):
         Order of operations: Self-Attn -> Residual -> LN -> Cross-Attn -> Residual -> LN -> FFN -> Residual -> LN
         """
         if self.attention_type == 'NI':
-            comp_score = self.type(encoder_query)
+            comp_score = self.t(encoder_query)
 
         if self.attention_type == 'NI':
-            self_attn_output = self.first_sub_layer(encoder_query, encoder_keys, encoder_keys, self.codes, comp_score, encoder_mask)
+            self_attn_output = self.first_sub_layer(encoder_query.unsqueeze(1), encoder_keys.unsqueeze(1), encoder_keys.unsqueeze(1), self.codes, comp_score, encoder_mask)
+            self_attn_output += encoder_query.unsqueeze(1)
         else:
             self_attn_output = self.first_sub_layer(encoder_query, encoder_keys, encoder_keys, encoder_mask)
-        self_attn_output += encoder_query
+            self_attn_output += encoder_query
         self_attn_output = self.layer_norm_1(self_attn_output)
 
         if self.attention_type == 'NI':
@@ -146,6 +153,9 @@ class TransformerEncoderBlock(nn.Module):
             output_states = self.second_sub_layer(self_attn_output)
         output_states += self_attn_output
         output_states = self.layer_norm_2(output_states)
+
+        if self.attention_type == 'NI':
+            output_states = (output_states * comp_score).sum(dim=1)
 
         return output_states
 
