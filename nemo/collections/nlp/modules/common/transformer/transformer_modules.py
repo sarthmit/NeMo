@@ -509,7 +509,7 @@ class NIAttention(nn.Module):
         x = x.view(*new_x_shape)
         return x.permute(0, 1, 3, 2, 4)
 
-    def forward(self, queries, keys, values, codes, comp_score, attention_mask):
+    def forward(self, queries, keys, values, attention_mask, codes=None, comp_score=None):
 
         # attention_mask is needed to hide the tokens which correspond to [PAD]
         # in the case of BERT, or to hide the future tokens in the case of
@@ -542,6 +542,8 @@ class NIAttention(nn.Module):
 
         # output projection
         output_states = self.out_projection(context * out_c)
+        if comp_score is not None:
+            output_states = (output_states * comp_score).sum(dim=1)
         output_states = self.layer_dropout(output_states)
         return output_states
 
@@ -573,7 +575,7 @@ class NIPositionWiseFF(nn.Module):
         ACT2FN = {"gelu": gelu, "relu": torch.relu}
         self.act_fn = ACT2FN[hidden_act]
 
-    def forward(self, hidden_states, codes, comp_score):
+    def forward(self, hidden_states, codes):
         c_1 = self.ln_1(self.wc_1(codes)) # (1, num_rules, 1, hidden_size)
         c_2 = self.ln_2(self.wc_2(codes)) # (1, num_rules, 1, inner_size)
 
