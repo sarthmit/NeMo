@@ -152,7 +152,7 @@ class TransformerEncoderBlock(nn.Module):
         comp_score = self.t(residual)
         encoder_query = self.layer_norm_1(encoder_query)
         encoder_keys = self.layer_norm_1(encoder_keys)
-        self_attn_output = self.first_sub_layer(encoder_query.unsqueeze(1), encoder_keys.unsqueeze(1), encoder_keys.unsqueeze(1), encoder_mask, self.codes, None)
+        self_attn_output = self.first_sub_layer(encoder_query.unsqueeze(1), encoder_keys.unsqueeze(1), encoder_keys.unsqueeze(1), encoder_mask, self.codes, comp_score)
         self_attn_output += residual
 
         residual = self_attn_output
