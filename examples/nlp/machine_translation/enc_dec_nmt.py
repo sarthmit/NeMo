@@ -28,7 +28,7 @@ from nemo.core.config.pytorch_lightning import TrainerConfig
 from nemo.utils import logging
 from nemo.utils.config_utils import update_model_config
 from nemo.utils.exp_manager import ExpManagerConfig, exp_manager
-
+from pytorch_lightning.utilities.seed import seed_everything
 
 """
 Usage:
@@ -95,6 +95,7 @@ class MTEncDecConfig(NemoConfig):
     name: Optional[str] = 'MTEncDec'
     do_training: bool = True
     do_testing: bool = False
+    seed: int = 0
     model: MTEncDecModelConfig = MTEncDecModelConfig()
     trainer: Optional[TrainerConfig] = TrainerConfig()
     exp_manager: Optional[ExpManagerConfig] = ExpManagerConfig(name='MTEncDec', files_to_copy=[])
@@ -105,6 +106,7 @@ def main(cfg: MTEncDecConfig) -> None:
     # merge default config with user specified config
     default_cfg = MTEncDecConfig()
     cfg = update_model_config(default_cfg, cfg)
+    seed_everything(cfg.seed)
     logging.info("\n\n************** Experiment configuration ***********")
     logging.info(f'Config: {OmegaConf.to_yaml(cfg)}')
 
